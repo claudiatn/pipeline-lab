@@ -31,4 +31,15 @@ describe('App API', () => {
       expect(res.body.items.length).toBeGreaterThan(0);
     });
   });
+
+  describe('Server bootstrap', () => {
+    it('should start listening when run as main module', () => {
+      const http = require('http');
+      const server = http.createServer(app);
+      server.listen(0); // puerto aleatorio, no colisiona
+      expect(server.listening).toBe(true);
+      server.close();
+    });
+  });
+
 });
