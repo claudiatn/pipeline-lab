@@ -179,9 +179,9 @@ jobs:
           tags: |
             ${{ steps.version.outputs.image }}:${{ steps.version.outputs.version }}
             ${{ steps.version.outputs.image }}:latest
-            # Buena práctica: caché de capas Docker con GitHub Actions cache
-            # cache-from: type=gha
-            # cache-to: type=gha,mode=max
+          # Buena práctica: caché de capas Docker con GitHub Actions cache
+          # cache-from: type=gha
+          # cache-to: type=gha,mode=max
           labels: |
               org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
               org.opencontainers.image.revision=${{ github.sha }}
