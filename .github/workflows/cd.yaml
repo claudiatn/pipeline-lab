@@ -1,11 +1,19 @@
 name: CD — Continuous Deployment
  
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'app/**'
+  # push:
+  #   branches:
+  #     - main
+  #   paths:
+  #     - 'app/**'
+  workflow_call:
+    inputs:
+      image:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
  
 # Buena práctica: evitar despliegues simultáneos a producción
 concurrency:
@@ -24,72 +32,84 @@ env:
   WORKING_DIR: './app'
 
 jobs:
- 
+
+   
   # ─────────────────────────────────────────────
-  # JOB 1: Build & Push Docker image
+  # JOB 2: Deploy to Staging preproducción
   # ─────────────────────────────────────────────
-  build-and-push:
-    name: Build & Push — Docker image to GHCR
+  deploy-staging:
+    name: Deploy — Staging environment
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      image: ${{ steps.version.outputs.image }}
+    timeout-minutes: 15
+    needs: build-and-push
+ 
+    # Buena práctica: usar GitHub Environments para trazabilidad y protección
+    environment:
+      name: staging
+      url: https://staging.devops-app.example.com
  
     steps:
-      - name: Checkout repository (full history)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
- 
-      - name: Generate semantic version
-        id: version
+      - name: Deploy to staging
         run: |
-          SHA_SHORT=$(echo $GITHUB_SHA | cut -c1-7)
-          VERSION="1.${{ github.run_number }}.${SHA_SHORT}"
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
-          echo "Generated version: ${VERSION}"
+          echo "🚀 Deploying to STAGING"
+          echo "   Image: ${{ inputs.image }}:${{ inputs.version }}"
+          echo "   Environment: staging"
+          echo "   Deployed by: ${{ github.actor }}"
+          # En un caso real, aquí iría: kubectl set image, helm upgrade, etc.
  
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
- 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          # Buena práctica: usar el GITHUB_TOKEN automático, nunca hardcodear
-          password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Build and push Docker image
-        id: docker-build
-        uses: docker/build-push-action@v7
-        with:
-          context: ${{ env.WORKING_DIR }}
-          push: true
-          target: production
-          tags: |
-            ${{ steps.version.outputs.image }}:${{ steps.version.outputs.version }}
-            ${{ steps.version.outputs.image }}:latest
-          # Buena práctica: caché de capas Docker con GitHub Actions cache
-          # cache-from: type=gha
-          # cache-to: type=gha,mode=max
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
- 
-      - name: Generate job summary
+      - name: Run smoke tests
         run: |
-          echo "## 🐳 Docker Image Published" >> $GITHUB_STEP_SUMMARY
+          echo "🔥 Running smoke tests against staging..."
+          echo "   GET /health → 200 OK ✓"
+          echo "   GET /api/items → 200 OK ✓"
+          echo "Smoke tests passed ✓"
+          # En un caso real: curl, newman, etc.
+ 
+      - name: Notify staging deployment
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✅ Staging deployment succeeded: ${{ inputs.version }}"
+          else
+            echo "❌ Staging deployment failed"
+          fi
+  
+  # ─────────────────────────────────────────────
+  # JOB 3: Deploy to Production (con aprobación manual)
+  # ─────────────────────────────────────────────
+  deploy-production:
+    name: Deploy — Production environment
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs:
+      - build-and-push
+      - deploy-staging
+ 
+    # Buena práctica: environment con required reviewers configurado en GitHub
+    # (Settings → Environments → production → Required reviewers)
+    environment:
+      name: production
+      url: https://devops-app.example.com
+ 
+    steps:
+      - name: Deploy to production
+        run: |
+          echo "🚀 Deploying to PRODUCTION"
+          echo "   Image: ${{ inputs.image }}:${{ inputs.version }}"
+          echo "   Environment: production"
+          echo "   Approved and deployed by: ${{ github.actor }}"
+          # En un caso real aquí iría el despliegue real
+ 
+      - name: Verify production health
+        run: |
+          echo "🏥 Checking production health..."
+          echo "   GET https://devops-app.example.com/health → 200 OK ✓"
+          echo "Production deployment verified ✓"
+ 
+      - name: Generate production summary
+        run: |
+          echo "## 🎉 Production Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Campo | Valor |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Version** | \`${{ steps.version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Image** | \`${{ steps.version.outputs.image }}:${{ steps.version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Latest tag** | \`${{ steps.version.outputs.image }}:latest\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Digest** | \`${{ steps.docker-build.outputs.digest }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Actor** | @${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** \`${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployed by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **URL:** https://devops-app.example.com" >> $GITHUB_STEP_SUMMARY
