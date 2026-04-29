@@ -1,0 +1,200 @@
+name: Release — Tag & Notify
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# Buena práctica: permisos mínimos — contents:write solo para crear la release
+permissions:
+  contents: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/${{ github.event.repository.name }}
+
+jobs:
+
+  # ─────────────────────────────────────────────
+  # JOB 1: Crear GitHub Release con CHANGELOG
+  # ─────────────────────────────────────────────
+  create-release:
+    name: Release — Create GitHub Release with changelog
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    outputs:
+      release_url: ${{ steps.create-release.outputs.html_url }}
+      tag_name: ${{ github.ref_name }}
+
+    steps:
+      - name: Checkout repository (full history for changelog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate CHANGELOG from commits
+        id: changelog
+        run: |
+          # Obtener el tag anterior
+          PREV_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '2p')
+          CURRENT_TAG="${{ github.ref_name }}"
+
+          echo "Current tag: ${CURRENT_TAG}"
+          echo "Previous tag: ${PREV_TAG:-'(first release)'}"
+
+          # Generar changelog
+          {
+            echo "## What's Changed in ${CURRENT_TAG}"
+            echo ""
+
+            if [ -z "${PREV_TAG}" ]; then
+              echo "### 🎉 First Release"
+              echo ""
+              git log --pretty=format:"- %s (%h) — @%an" --no-merges | head -30
+            else
+              # Features (commits con feat:)
+              FEATURES=$(git log "${PREV_TAG}..${CURRENT_TAG}" --pretty=format:"- %s (%h)" --no-merges --grep="^feat")
+              if [ -n "${FEATURES}" ]; then
+                echo "### ✨ New Features"
+                echo "${FEATURES}"
+                echo ""
+              fi
+
+              # Bug fixes (commits con fix:)
+              FIXES=$(git log "${PREV_TAG}..${CURRENT_TAG}" --pretty=format:"- %s (%h)" --no-merges --grep="^fix")
+              if [ -n "${FIXES}" ]; then
+                echo "### 🐛 Bug Fixes"
+                echo "${FIXES}"
+                echo ""
+              fi
+
+              # Otros cambios
+              OTHERS=$(git log "${PREV_TAG}..${CURRENT_TAG}" --pretty=format:"- %s (%h)" --no-merges | grep -Ev "^- (feat|fix|chore|docs):")
+              if [ -n "${OTHERS}" ]; then
+                echo "### 🔧 Other Changes"
+                echo "${OTHERS}"
+                echo ""
+              fi
+
+              echo "### 📊 Stats"
+              COMMIT_COUNT=$(git log "${PREV_TAG}..${CURRENT_TAG}" --no-merges --oneline | wc -l | tr -d ' ')
+              echo "- **Commits:** ${COMMIT_COUNT}"
+              echo "- **Compare:** [\`${PREV_TAG}...${CURRENT_TAG}\`](${{ github.server_url }}/${{ github.repository }}/compare/${PREV_TAG}...${CURRENT_TAG})"
+            fi
+
+            echo ""
+            echo "---"
+            echo "*Released by @${{ github.actor }} on $(date -u '+%Y-%m-%d %H:%M UTC')*"
+          } > CHANGELOG_RELEASE.md
+
+          # Guardar para el siguiente step (multiline)
+          {
+            echo 'CHANGELOG<<EOF'
+            cat CHANGELOG_RELEASE.md
+            echo 'EOF'
+          } >> $GITHUB_OUTPUT
+
+          echo "Changelog generated:"
+          cat CHANGELOG_RELEASE.md
+
+      - name: Create GitHub Release
+        id: create-release
+        uses: actions/create-release@v1
+        env:
+          # Buena práctica: usar GITHUB_TOKEN del contexto, no hardcodeado
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: ${{ github.ref_name }}
+          body: ${{ steps.changelog.outputs.CHANGELOG }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
+
+      - name: Generate release summary
+        run: |
+          echo "## 🏷️ Release ${{ github.ref_name }} Created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release URL:** ${{ steps.create-release.outputs.html_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Created by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+
+  # ─────────────────────────────────────────────
+  # JOB 2: Notificación a Slack
+  # ─────────────────────────────────────────────
+  notify:
+    name: Notify — Slack release announcement
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: create-release
+
+    steps:
+      - name: Build Slack notification payload
+        id: payload
+        run: |
+          PAYLOAD=$(cat <<EOF
+          {
+            "text": "🚀 *New Release Published!*",
+            "blocks": [
+              {
+                "type": "header",
+                "text": {
+                  "type": "plain_text",
+                  "text": "🚀 New Release: ${{ needs.create-release.outputs.tag_name }}"
+                }
+              },
+              {
+                "type": "section",
+                "fields": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Repository:*\n${{ github.repository }}"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Tag:*\n\`${{ needs.create-release.outputs.tag_name }}\`"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Released by:*\n@${{ github.actor }}"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Release notes:*\n<${{ needs.create-release.outputs.release_url }}|View on GitHub>"
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+          )
+          echo "payload=${PAYLOAD}" >> $GITHUB_OUTPUT
+
+      - name: Send Slack notification
+        # Buena práctica: continuar aunque Slack falle (el secret puede no existir)
+        continue-on-error: true
+        env:
+          # Buena práctica: secreto desde GitHub Secrets, nunca en variables de entorno normales
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "⚠️  SLACK_WEBHOOK_URL secret not configured — skipping notification"
+            exit 0
+          fi
+
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H 'Content-type: application/json' \
+            --data '${{ steps.payload.outputs.payload }}' \
+            "${SLACK_WEBHOOK_URL}")
+
+          if [ "${HTTP_STATUS}" = "200" ]; then
+            echo "✅ Slack notification sent successfully"
+          else
+            echo "❌ Slack notification failed with HTTP status: ${HTTP_STATUS}"
+            exit 1
+          fi
