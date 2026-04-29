@@ -62,3 +62,34 @@ jobs:
           username: ${{ github.actor }}
           # Buena práctica: usar el GITHUB_TOKEN automático, nunca hardcodear
           password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Build and push Docker image
+        id: docker-build
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ env.WORKING_DIR }}
+          push: true
+          target: production
+          tags: |
+            ${{ steps.version.outputs.image }}:${{ steps.version.outputs.version }}
+            ${{ steps.version.outputs.image }}:latest
+          # Buena práctica: caché de capas Docker con GitHub Actions cache
+          # cache-from: type=gha
+          # cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+ 
+      - name: Generate job summary
+        run: |
+          echo "## 🐳 Docker Image Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Campo | Valor |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version** | \`${{ steps.version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Image** | \`${{ steps.version.outputs.image }}:${{ steps.version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Latest tag** | \`${{ steps.version.outputs.image }}:latest\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Digest** | \`${{ steps.docker-build.outputs.digest }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Actor** | @${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
