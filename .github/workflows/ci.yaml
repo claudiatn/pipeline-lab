@@ -1,13 +1,13 @@
 name: CI — Continuous Integration
  
 on:
-  push:
-    branches:
-      - '**'
-  pull_request:
-    branches:
-      - main
-      - develop
+  # push:
+  #   branches:
+  #     - '**'
+  # pull_request:
+  #   branches:
+  #     - main
+  #     - develop
  
 # Buena práctica: cancelar runs anteriores del mismo PR o rama
 concurrency:
