@@ -6,6 +6,9 @@ on:
       - main
     paths:
       - 'app/**'
+  pull_request:
+    branches:
+      - main
 
 concurrency:
   group: cd-production
