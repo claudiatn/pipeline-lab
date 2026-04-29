@@ -41,7 +41,6 @@ jobs:
     name: Deploy — Staging environment
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: build-and-push
  
     # Buena práctica: usar GitHub Environments para trazabilidad y protección
     environment:
