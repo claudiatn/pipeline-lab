@@ -17,6 +17,8 @@ concurrency:
 # Buena práctica: permisos mínimos a nivel de workflow
 permissions:
   contents: read
+  packages: write
+  deployments: write
 
 # Buena práctica: centralizar valores reutilizables
 env:
