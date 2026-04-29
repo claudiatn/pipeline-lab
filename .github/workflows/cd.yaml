@@ -80,9 +80,7 @@ jobs:
     name: Deploy — Production environment
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs:
-      - build-and-push
-      - deploy-staging
+    needs: deploy-staging
  
     # Buena práctica: environment con required reviewers configurado en GitHub
     # (Settings → Environments → production → Required reviewers)
