@@ -97,7 +97,7 @@ jobs:
     strategy:
       fail-fast: false # hace que aunque uno falle los demas sigan ejecutandose
       matrix:          
-      node-version: ['18', '20', '22']
+        node-version: ['18', '20', '22']
   
     steps:
         - name: Checkout repository
