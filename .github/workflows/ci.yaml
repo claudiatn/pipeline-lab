@@ -24,7 +24,9 @@ permissions:
 env:
   NODE_VERSION_DEFAULT: '20'
   WORKING_DIR: './app'
- 
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/${{ github.event.repository.name }}
+
 jobs:
  
   # ─────────────────────────────────────────────
