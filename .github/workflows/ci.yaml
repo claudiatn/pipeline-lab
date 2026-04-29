@@ -26,12 +26,12 @@ env:
 jobs:
  
   # ─────────────────────────────────────────────
-  # JOB 1: Lint
+  # JOB 1: Lint -> Analiza el codigo buscando errores
   # ─────────────────────────────────────────────
   lint:
     name: Lint — ESLint code analysis
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 10 #Lo mata a los 10 minutos asi se evita un bloqueo
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIR }}
@@ -42,10 +42,10 @@ jobs:
  
       - name: Setup Node.js ${{ env.NODE_VERSION_DEFAULT }}
         uses: actions/setup-node@v4
-        # with:
-        #   node-version: ${{ env.NODE_VERSION_DEFAULT }}
-        #   cache: 'npm'
-        #   cache-dependency-path: 'app/package-lock.json'
+        with:
+          node-version: ${{ env.NODE_VERSION_DEFAULT }}
+          cache: 'npm'
+          cache-dependency-path: 'app/package-lock.json'
  
       - name: Install dependencies
         run: npm ci
@@ -54,7 +54,7 @@ jobs:
         run: npm run lint
 
   # ─────────────────────────────────────────────
-  # JOB 2: Security Audit (paralelo con lint)
+  # JOB 2: Security Audit (paralelo con lint) -> Busca vulnerabilidades
   # ─────────────────────────────────────────────
   security:
     name: Security — npm audit
@@ -82,7 +82,7 @@ jobs:
         run: npm audit --audit-level=high
     
   # ─────────────────────────────────────────────
-  # JOB 3: Test (matrix, depende de lint)
+  # JOB 3: Test (matrix, depende de lint)  -> se ejecutan los test en varias versiones 
   # ─────────────────────────────────────────────
   test:
     name: Test — Node.js ${{ matrix.node-version }}
@@ -94,7 +94,7 @@ jobs:
         working-directory: ${{ env.WORKING_DIR }}
  
     strategy:
-      fail-fast: false
+      fail-fast: false # hace que aunque uno falle los demas sigan ejecutandose
       matrix:
         node-version: ['18', '20', '22']
  
@@ -122,3 +122,36 @@ jobs:
           name: coverage-node-${{ matrix.node-version }}
           path: ${{ env.WORKING_DIR }}/coverage/
           retention-days: 7
+
+  # ─────────────────────────────────────────────
+  # JOB 4: Build check (depende de test y security)
+  # ─────────────────────────────────────────────
+  build-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: 
+    - test
+    - security
+    defaults:
+      run:
+        working-directory: ${{env.WORKING_DIR}}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ env.WORKING_DIR }}
+          push: false
+          tags: devops-app:ci-check
+          target: production
+      
+      - name: Verify image was built
+        run: echo "Docker image built successfully — ready for deployment pipeline"
+      
+
