@@ -1,112 +1,130 @@
 name: CD — Continuous Deployment
- 
+
 on:
-  # push:
-  #   branches:
-  #     - main
-  #   paths:
-  #     - 'app/**'
-  workflow_call:
-    inputs:
-      image:
-        required: true
-        type: string
-      version:
-        required: true
-        type: string
- 
-# Buena práctica: evitar despliegues simultáneos a producción
+  push:
+    branches:
+      - main
+    paths:
+      - 'app/**'
+
 concurrency:
   group: cd-production
-  cancel-in-progress: false   # No cancelar deploys en curso, esperar
- 
-# Buena práctica: permisos mínimos — solo los necesarios para ghcr.io y deployments
+  cancel-in-progress: false
+
 permissions:
   contents: read
-  packages: write
-  deployments: write
+  packages: read
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/${{ github.event.repository.name }}
-  WORKING_DIR: './app'
+  IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
 
-   
   # ─────────────────────────────────────────────
-  # JOB 2: Deploy to Staging preproducción
+  # JOB 1: Deploy to Staging
   # ─────────────────────────────────────────────
   deploy-staging:
     name: Deploy — Staging environment
     runs-on: ubuntu-latest
     timeout-minutes: 15
- 
-    # Buena práctica: usar GitHub Environments para trazabilidad y protección
     environment:
       name: staging
       url: https://staging.devops-app.example.com
- 
+
     steps:
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull latest image from GHCR
+        run: |
+          echo "📦 Pulling image: ${{ env.IMAGE }}:latest"
+          docker pull ${{ env.IMAGE }}:latest
+          echo "✅ Image pulled successfully"
+
+      - name: Get image version from label
+        id: image-info
+        run: |
+          VERSION=$(docker inspect ${{ env.IMAGE }}:latest \
+            --format '{{ index .Config.Labels "org.opencontainers.image.revision"}}' \
+            | cut -c1-7)
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Deploying commit: ${VERSION}"
+
       - name: Deploy to staging
         run: |
           echo "🚀 Deploying to STAGING"
-          echo "   Image: ${{ inputs.image }}:${{ inputs.version }}"
-          echo "   Environment: staging"
+          echo "   Image: ${{ env.IMAGE }}:latest"
+          echo "   Commit: ${{ steps.image-info.outputs.version }}"
           echo "   Deployed by: ${{ github.actor }}"
-          # En un caso real, aquí iría: kubectl set image, helm upgrade, etc.
- 
+          # kubectl set image deployment/app app=${{ env.IMAGE }}:latest
+          # helm upgrade app ./chart --set image.tag=latest
+          # docker-compose pull && docker-compose up -d
+
       - name: Run smoke tests
         run: |
           echo "🔥 Running smoke tests against staging..."
           echo "   GET /health → 200 OK ✓"
           echo "   GET /api/items → 200 OK ✓"
           echo "Smoke tests passed ✓"
-          # En un caso real: curl, newman, etc.
- 
-      - name: Notify staging deployment
+
+      - name: Notify staging result
         if: always()
         run: |
           if [ "${{ job.status }}" == "success" ]; then
-            echo "✅ Staging deployment succeeded: ${{ inputs.version }}"
+            echo "✅ Staging deployment succeeded"
           else
             echo "❌ Staging deployment failed"
           fi
-  
+
   # ─────────────────────────────────────────────
-  # JOB 3: Deploy to Production (con aprobación manual)
+  # JOB 2: Deploy to Production
   # ─────────────────────────────────────────────
   deploy-production:
     name: Deploy — Production environment
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: deploy-staging
- 
-    # Buena práctica: environment con required reviewers configurado en GitHub
-    # (Settings → Environments → production → Required reviewers)
     environment:
       name: production
       url: https://devops-app.example.com
- 
+
     steps:
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull latest image from GHCR
+        run: |
+          echo "📦 Pulling image: ${{ env.IMAGE }}:latest"
+          docker pull ${{ env.IMAGE }}:latest
+          echo "✅ Image pulled successfully"
+
       - name: Deploy to production
         run: |
           echo "🚀 Deploying to PRODUCTION"
-          echo "   Image: ${{ inputs.image }}:${{ inputs.version }}"
-          echo "   Environment: production"
+          echo "   Image: ${{ env.IMAGE }}:latest"
           echo "   Approved and deployed by: ${{ github.actor }}"
-          # En un caso real aquí iría el despliegue real
- 
+
       - name: Verify production health
         run: |
           echo "🏥 Checking production health..."
           echo "   GET https://devops-app.example.com/health → 200 OK ✓"
           echo "Production deployment verified ✓"
- 
+
       - name: Generate production summary
         run: |
           echo "## 🎉 Production Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Version:** \`${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Deployed by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **URL:** https://devops-app.example.com" >> $GITHUB_STEP_SUMMARY
+          echo "| Campo | Valor |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Image** | \`${{ env.IMAGE }}:latest\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Deployed by** | @${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **URL** | https://devops-app.example.com |" >> $GITHUB_STEP_SUMMARY

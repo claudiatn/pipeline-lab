@@ -200,11 +200,11 @@ jobs:
             echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
             echo "| **Actor** | @${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
 
-  cd:
-    needs: build-and-push
-    uses: claudiatn/pipeline-lab/.github/workflows/cd.yaml@main
-    with:
-      image: ${{ needs.build-and-push.outputs.image }}
-      version: ${{ needs.build-and-push.outputs.version }}
-    secrets: inherit 
+  # cd:
+  #   needs: build-and-push
+  #   uses: claudiatn/pipeline-lab/.github/workflows/cd.yaml@main
+  #   with:
+  #     image: ${{ needs.build-and-push.outputs.image }}
+  #     version: ${{ needs.build-and-push.outputs.version }}
+  #   secrets: inherit 
 
